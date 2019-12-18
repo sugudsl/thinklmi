@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Think LMI BIOS configuration driver
  *
@@ -378,24 +379,12 @@ static int think_lmi_extract_output_string(const struct acpi_buffer *output,
 	return *string ? 0 : -ENOMEM;
 }
 
-static int think_lmi_bios_setting(int item, char **value)
+static int think_lmi_setting(int item, char **value, const char *guid_string)
 {
 	struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
 	acpi_status status;
 
-	status = wmi_query_block(LENOVO_BIOS_SETTING_GUID, item, &output);
-	if (ACPI_FAILURE(status))
-		return -EIO;
-
-	return think_lmi_extract_output_string(&output, value);
-}
-
-static int think_lmi_platform_setting(int item, char **value)
-{
-	struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
-	acpi_status status;
-
-	status = wmi_query_block(LENOVO_PLATFORM_SETTING_GUID, item, &output);
+	status = wmi_query_block(guid_string, item, &output);
 	if (ACPI_FAILURE(status))
 		return -EIO;
 
@@ -505,7 +494,7 @@ static ssize_t show_setting(struct device *dev,
 	ssize_t count = 0;
 	int ret;
 
-	ret = think_lmi_bios_setting(item, &settings);
+	ret = think_lmi_setting(item, &settings, LENOVO_BIOS_SETTING_GUID);
 	if (ret)
 		return ret;
 	if (!settings)
@@ -532,7 +521,8 @@ static ssize_t show_setting(struct device *dev,
 
 error:
 	kfree(settings);
-	kfree(choices);
+	if (choices)
+		kfree(choices);
 	return ret ? ret : count;
 }
 
@@ -600,6 +590,8 @@ static ssize_t show_auth(struct think_lmi *think, char *buf,
 {
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
+	if (!buf)
+		return -EIO;
 
 	return sprintf(buf, "%s\n", data ? : "(nil)");
 }
@@ -695,7 +687,7 @@ static ssize_t show_password_settings(struct device *dev,
 	ret = think_lmi_password_settings(&pcfg);
 	if (ret)
 		return ret;
-	ret += sprintf(buf, "password_mode:       %#x\n", pcfg.password_mode);
+	ret += sprintf(buf,       "password_mode:       %#x\n", pcfg.password_mode);
 	ret += sprintf(buf + ret, "password_state:      %#x\n",
 		       pcfg.password_state);
 	ret += sprintf(buf + ret, "min_length:          %d\n", pcfg.min_length);
@@ -724,8 +716,16 @@ static ssize_t store_password_change(struct device *dev,
 	/* Format: 'PasswordType,CurrentPw,NewPw,Encoding,KbdLang;' */
 
 	/* auth_string is the size of CurrentPassword,Encoding,KbdLang */
-	buffer_size = (sizeof(think->password_type) + 1 + count + 1 +
-		       sizeof(think->auth_string) + 2);
+	buffer_size = (sizeof(think->password_type) + 1 + count +
+		       sizeof(think->auth_string) + 2); //Is auth_string needed?
+
+	if (*think->password) 
+		buffer_size += 1 + sizeof(think->password);
+	if (*think->password_encoding) 
+		buffer_size += 1 + sizeof(think->password_encoding);
+	if (*think->password_kbdlang) 
+		buffer_size += 1 + sizeof(think->password_kbdlang);
+
 	buffer = kmalloc(buffer_size, GFP_KERNEL);
 	if (!buffer)
 		return -ENOMEM;
@@ -752,6 +752,7 @@ static ssize_t store_password_change(struct device *dev,
 	strcat(buffer, ";");
 
 	ret = think_lmi_set_bios_password(buffer);
+	kfree(buffer);
 	if (ret)
 		return ret;
 
@@ -967,8 +968,8 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd, unsigne
 			}			
 			raw_copy_to_user((query_arg_t *)arg, &q, sizeof(query_arg_t));
 			break;
-
-
+		default:
+			/*Return error condition?*/
 	}
 	return THINK_LMI_SUCCESS;
 
@@ -991,7 +992,7 @@ static void show_bios_setting_line(struct think_lmi *think,
 	int ret;
 	char *settings = NULL, *choices = NULL, *p;
 
-	ret = think_lmi_bios_setting(i, &settings);
+	ret = think_lmi_setting(i, &settings, LENOVO_BIOS_SETTING_GUID);
 	if (ret || !settings)
 		return;
 
@@ -999,7 +1000,6 @@ static void show_bios_setting_line(struct think_lmi *think,
 	if (p)
 		*p = '=';
 	seq_printf(m, "%s", settings);
-
 
 	if (!think->can_get_bios_selections)
 		goto line_feed;
@@ -1015,7 +1015,8 @@ static void show_bios_setting_line(struct think_lmi *think,
 
 line_feed:
 	kfree(settings);
-	kfree(choices);
+	if (choices)
+		kfree(choices);
 	seq_puts(m, "\n");
 }
 
@@ -1025,7 +1026,7 @@ static void show_platform_setting_line(struct think_lmi *think,
 	int ret;
 	char *settings = NULL, *p;
 
-	ret = think_lmi_platform_setting(i, &settings);
+	ret = think_lmi_platform_setting(i, &settings, LENOVO_PLATFORM_SETTING_GUID);
 	if (ret || !settings)
 		return;
 
@@ -1033,7 +1034,6 @@ static void show_platform_setting_line(struct think_lmi *think,
 	if (p)
 		*p = '=';
 	seq_printf(m, "%s", settings);
-
 
 	kfree(settings);
 	seq_puts(m, "\n");
@@ -1079,7 +1079,8 @@ static int dbgfs_list_valid_choices(struct seq_file *m, void *data)
 					       &choices);
 
 	if (ret || !choices || !*choices) {
-		kfree(choices);
+		if (choices)
+			kfree(choices);
 		return -EIO;
 	}
 
@@ -1247,7 +1248,6 @@ static int think_lmi_debugfs_init(struct think_lmi *think)
 		}
 	}
 
-
 	return 0;
 
 error_debugfs:
@@ -1262,7 +1262,8 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
 
 	if ((ret = alloc_chrdev_region(&dev, FIRST_MINOR, MINOR_CNT, DEVICE_NAME)) < 0)
 	{
-	   printk("char dev allocation failed\n");
+		printk(KERN_ERR "char dev allocation failed\n");
+		return;
         }
 
         //cdev_init(&c_dev, &think_lmi_chardev_fops);	
@@ -1270,23 +1271,24 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
 
 	if ((ret = cdev_add(&think->c_dev, dev, MINOR_CNT)) < 0)
 	{
-	  printk("char dev registration failed\n");
+		printk(KERN_ERR "char dev registration failed\n");
+		return;
 	}
 
         if (IS_ERR(cl = class_create(THIS_MODULE, "char")))
         {
-          cdev_del(&think->c_dev);
-          unregister_chrdev_region(dev, MINOR_CNT);
-        
-	  printk("char dev class creation failed\n");
+		cdev_del(&think->c_dev);
+		unregister_chrdev_region(dev, MINOR_CNT);
+		printk(KERN_ERR "char dev class creation failed\n");
+		return;
         }
         if (IS_ERR(dev_ret = device_create(cl, NULL, dev, NULL, "thinklmi")))
         {
-          class_destroy(cl);
-          cdev_del(&think->c_dev);
-          unregister_chrdev_region(dev, MINOR_CNT);
-	  printk("char dev device creation failed\n");
-        }	
+		class_destroy(cl);
+		cdev_del(&think->c_dev);
+		unregister_chrdev_region(dev, MINOR_CNT);
+		printk(KERN_ERR "char dev device creation failed\n");
+        }
 }
 
 /* Base driver */
@@ -1303,7 +1305,7 @@ static void think_lmi_analyze(struct think_lmi *think)
 		int num = 0;
 		char *p;
 
-		status = think_lmi_bios_setting(i, &item);
+		status = think_lmi_setting(i, &item, LENOVO_BIOS_SETTING_GUID);
 		if (ACPI_FAILURE(status))
 			break;
 		if (!item )
@@ -1349,8 +1351,6 @@ static void think_lmi_analyze(struct think_lmi *think)
 	if (wmi_has_guid(LENOVO_BIOS_PASSWORD_SETTINGS_GUID))
 		think->can_get_password_settings = true;
 }
-
-
 
 static int think_lmi_add(struct wmi_device *wdev)
 {
