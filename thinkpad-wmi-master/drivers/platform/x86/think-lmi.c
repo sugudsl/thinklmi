@@ -946,7 +946,11 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd, unsigne
 {
         struct think_lmi *think;
 	query_arg_t q;
-	int i,j;
+	int i,j,ret,item;
+	char get_set_string[MAXCOUNT + MAXLEN];
+	char *settings = NULL, *choices = NULL, *value; 
+	ssize_t count =0;
+	
 	think = filp->private_data;
 
 
@@ -968,10 +972,70 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd, unsigne
 			}			
 			raw_copy_to_user((query_arg_t *)arg, &q, sizeof(query_arg_t));
 			break;
+
+		 case THINKLMI_SET_SETTING:
+			raw_copy_from_user(get_set_string, (void *)arg, sizeof(get_set_string));
+
+			ret = think_lmi_set_bios_settings(get_set_string);
+		        break;
+		 case THINKLMI_SHOW_SETTING:
+			item =0;
+			raw_copy_from_user(get_set_string, (void *)arg, sizeof(get_set_string));
+			printk("%s\n",get_set_string);
+                        for(i=0; i<=think->settings_count; i++)
+			{
+				if(think->settings[i] != NULL)
+				{
+					if(!strcmp(get_set_string, think->settings[i]))
+					{    
+						printk("the setting is %d\n", i);
+						item = i;
+					}
+				}
+				
+
+			}
+
+			ret = think_lmi_setting(item,&settings, LENOVO_BIOS_SETTING_GUID);
+			if(ret)
+				return ret;
+			if(!settings)
+				return -EIO;
+
+			ret = think_lmi_get_bios_selections(get_set_string, &choices);
+			if(ret)
+				goto error;
+			if(!choices || !*choices)
+			{
+				return -EIO;
+			        goto error; 
+			}
+
+			value = strchr(settings, ',');
+			if(!value)
+				goto error;
+			value ++;
+
+			count = sprintf(get_set_string, "%s\n", value);
+			if(choices)
+				count += sprintf(get_set_string + count, "%s\n", choices);
+                         
+
+
+			raw_copy_to_user((char *)arg, get_set_string, sizeof(get_set_string));
+			break;
 		default:
 			/*Return error condition?*/
+			printk("in default\n");
 	}
+
 	return THINK_LMI_SUCCESS;
+
+error:
+        kfree(settings);
+        if(choices)
+		kfree(choices);
+	return ret ? ret : count;
 
 }
 
@@ -1026,7 +1090,7 @@ static void show_platform_setting_line(struct think_lmi *think,
 	int ret;
 	char *settings = NULL, *p;
 
-	ret = think_lmi_platform_setting(i, &settings, LENOVO_PLATFORM_SETTING_GUID);
+	ret = think_lmi_setting(i, &settings, LENOVO_PLATFORM_SETTING_GUID);
 	if (ret || !settings)
 		return;
 
