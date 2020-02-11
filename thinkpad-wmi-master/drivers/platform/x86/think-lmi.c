@@ -21,7 +21,7 @@
  *  Copyright(c) 2019 Lenovo
  *
  *   10/18/2019: Modifications to add IOCTL access to BIOS settings
- *              
+ *
  *
  */
 
@@ -172,7 +172,7 @@ MODULE_LICENSE("GPL");
  * Name:
  *  Lenovo_GetBiosSelections
  * Description:
- *  Return a list valid settings for a given item.
+ *  Return a list of valid settings for a given item.
  * Type:
  *  Method
  * Arguments:
@@ -188,7 +188,9 @@ MODULE_LICENSE("GPL");
 
 /**
  * Name:
- *  ???
+ *  Lenovo_PlatformSettingGUID, Lenovo_SetPlatformSettingGUID
+ * Description
+ *  debugfs method to get/set platform setting
  * Type:
  *  Method
  * Arguments:
@@ -198,19 +200,18 @@ MODULE_LICENSE("GPL");
  * LMI-Internals:
  *  Return big chunk of data
  */
-#define LENOVO_QUERY_GUID			\
-	"05901221-D566-11D1-B2F0-00A0C9062910"
-
 #define LENOVO_PLATFORM_SETTING_GUID \
     "7430019A-DCE9-4548-BAB0-9FDE0935CAFF"
 
 #define LENOVO_SET_PLATFORM_SETTINGS_GUID \
     "7FF47003-3B6C-4E5E-A227-E979824A85D1"
+/* For future use
+ * #define LENOVO_QUERY_GUID "05901221-D566-11D1-B2F0-00A0C9062910"
+ */
 
-#define DEVICE_NAME "thinklmi"
+#define TLMI_NAME "thinklmi"
 
 /* Return values */
-
 enum {
 	/*
 	 * "Success"
@@ -241,12 +242,11 @@ enum {
 	THINK_LMI_SYSTEM_BUSY = -EBUSY
 };
 
-#define FIRST_MINOR 0
-#define MINOR_CNT 1
+#define TLMI_NUM_DEVICES 1
 
 /* Only add an alias on this one, since it's the one used
  * in think_lmi_probe */
-MODULE_ALIAS("lmi:"LENOVO_BIOS_SETTING_GUID);
+MODULE_ALIAS("tlmi:"LENOVO_BIOS_SETTING_GUID);
 
 struct think_lmi_pcfg {
 	uint32_t password_mode;
@@ -274,7 +274,6 @@ struct think_lmi_pcfg {
  */
 struct think_lmi_debug {
 	struct dentry *root;
-
 	u8 instances_count;
 	u8 instance;
 	char argument[512];
@@ -304,13 +303,8 @@ struct think_lmi {
 	struct cdev c_dev;
 };
 
-static dev_t dev;
-//static struct cdev c_dev;
-static struct class *cl;
-
-//static int major = 0;
-//static int dev_opem = 0;
-//char *msg_ptr;
+static dev_t tlmi_dev;
+static struct class *tlmi_class;
 
 /* helpers */
 static int think_lmi_errstr_to_err(const char *errstr)
@@ -467,7 +461,8 @@ static int think_lmi_password_settings(struct think_lmi_pcfg *pcfg)
 			kfree(obj);
 			return 0;
 		} else {
-			pr_warn("Unknown pcfg buffer length %d\n", obj->buffer.length);
+			pr_warn("Unknown pcfg buffer length %d\n",
+				obj->buffer.length);
 			kfree(obj);
 			return -EIO;
 		}
@@ -646,20 +641,20 @@ static ssize_t store_auth(struct think_lmi *think,
 				    struct device_attribute *attr,	\
 				    char *buf)				\
 	{								\
-		struct think_lmi *think = dev_get_drvdata(dev); 	\
+		struct think_lmi *think = dev_get_drvdata(dev);		\
 									\
 		return show_auth(think, buf,				\
-				 think->_name,		        	\
-				 sizeof(think->_name));	        	\
+				 think->_name,				\
+				 sizeof(think->_name));			\
 	}								\
 	static ssize_t store_##_name(struct device *dev,		\
 				     struct device_attribute *attr,	\
 				     const char *buf, size_t count)	\
 	{								\
-		struct think_lmi *think = dev_get_drvdata(dev); 	\
+		struct think_lmi *think = dev_get_drvdata(dev);		\
 									\
 		return store_auth(think, buf, count,			\
-				  think->_name,		        	\
+				  think->_name,				\
 				  sizeof(think->_name));		\
 	}								\
 	static struct device_attribute dev_attr_##_name = {		\
@@ -687,7 +682,8 @@ static ssize_t show_password_settings(struct device *dev,
 	ret = think_lmi_password_settings(&pcfg);
 	if (ret)
 		return ret;
-	ret += sprintf(buf,       "password_mode:       %#x\n", pcfg.password_mode);
+	ret += sprintf(buf,       "password_mode:       %#x\n",
+		       pcfg.password_mode);
 	ret += sprintf(buf + ret, "password_state:      %#x\n",
 		       pcfg.password_state);
 	ret += sprintf(buf + ret, "min_length:          %d\n", pcfg.min_length);
@@ -719,11 +715,11 @@ static ssize_t store_password_change(struct device *dev,
 	buffer_size = (sizeof(think->password_type) + 1 + count +
 		       sizeof(think->auth_string) + 2); //Is auth_string needed?
 
-	if (*think->password) 
+	if (*think->password)
 		buffer_size += 1 + sizeof(think->password);
-	if (*think->password_encoding) 
+	if (*think->password_encoding)
 		buffer_size += 1 + sizeof(think->password_encoding);
-	if (*think->password_kbdlang) 
+	if (*think->password_kbdlang)
 		buffer_size += 1 + sizeof(think->password_kbdlang);
 
 	buffer = kmalloc(buffer_size, GFP_KERNEL);
@@ -799,7 +795,6 @@ static umode_t think_sysfs_is_visible(struct kobject *kobj,
 					 int idx)
 {
 	bool supported = true;
-
 	return supported ? attr->mode : 0;
 }
 
@@ -844,12 +839,11 @@ static int think_lmi_sysfs_init(struct wmi_device *wdev)
 	for (i = 0; i < count; ++i) {
 		struct dev_ext_attribute *deveattr = &devattrs[i];
 		struct device_attribute *devattr = &deveattr->attr;
-		if(!think->settings[i]) {
+		if (!think->settings[i])
 			continue;
-		}
 		sysfs_attr_init(&devattr->attr);
 		devattr->attr.name = think->settings[i];
-		devattr->attr.mode = S_IRUGO | S_IWUSR;
+		devattr->attr.mode = 0644;
 		devattr->show = show_setting;
 		devattr->store = store_setting;
 		deveattr->var = (void *)(uintptr_t)i;
@@ -941,100 +935,97 @@ static int think_lmi_chardev_open(struct inode *inode, struct file *file)
         return THINK_LMI_SUCCESS;
 }
 
-
-static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
+					unsigned long arg)
 {
         struct think_lmi *think;
-	query_arg_t q;
+	tlmi_query_arg_t q;
 	int i,j,ret,item;
-	char get_set_string[MAXCOUNT + MAXLEN];
-	char *settings = NULL, *choices = NULL, *value; 
+	char get_set_string[TLMI_SETTINGS_MAXCNT + TLMI_SETTINGS_MAXLEN];
+	char *settings = NULL, *choices = NULL, *value;
 	ssize_t count =0;
-	
+
 	think = filp->private_data;
-
-
 	switch(cmd){
-		case THINKLMI_GET_SETTINGS:
-			  q.settings_count = think->settings_count;
-			  raw_copy_to_user((query_arg_t *)arg, &q, sizeof(query_arg_t));
-			break;
-
-		case THINKLMI_GET_SETTINGS_STRINGS:
-
-			raw_copy_from_user(&q, (void *)arg, sizeof(query_arg_t));
-			j = q.count;
-			for(i=0;(i<MAXCOUNT)&&(j<=think->settings_count);i++, j++){				
-				  if(think->settings[j] != NULL){
-				  strncpy(q.settings[i], think->settings[j], (MAXLEN-1));
-				  q.settings[i][MAXLEN-1] = '\0';
-				  }
-			}			
-			raw_copy_to_user((query_arg_t *)arg, &q, sizeof(query_arg_t));
-			break;
-
-		 case THINKLMI_SET_SETTING:
-			raw_copy_from_user(get_set_string, (void *)arg, sizeof(get_set_string));
-
-			ret = think_lmi_set_bios_settings(get_set_string);
-		        break;
-		 case THINKLMI_SHOW_SETTING:
-			item =0;
-			raw_copy_from_user(get_set_string, (void *)arg, sizeof(get_set_string));
-			printk("%s\n",get_set_string);
-                        for(i=0; i<=think->settings_count; i++)
-			{
-				if(think->settings[i] != NULL)
-				{
-					if(!strcmp(get_set_string, think->settings[i]))
-					{    
-						printk("the setting is %d\n", i);
-						item = i;
-					}
+	case THINKLMI_GET_SETTINGS:
+		q.settings_count = think->settings_count;
+		if (copy_to_user((tlmi_query_arg_t *)arg, &q,
+				 sizeof(tlmi_query_arg_t)))
+			return -EFAULT;
+		break;
+	case THINKLMI_GET_SETTINGS_STRINGS:
+		if (copy_from_user(&q, (void *)arg,
+				   sizeof(tlmi_query_arg_t)))
+			return -EFAULT;
+		j = q.count;
+		for (i = 0;
+		     (i < TLMI_SETTINGS_MAXCNT) && (j <= think->settings_count);
+		     i++, j++) {
+			if (think->settings[j] != NULL) {
+				strncpy(q.settings[i],
+					think->settings[j],
+					(TLMI_SETTINGS_MAXLEN-1));
+				q.settings[i][TLMI_SETTINGS_MAXLEN-1] = '\0';
+			}
+		}
+		if (copy_to_user((tlmi_query_arg_t *)arg, &q,
+				 sizeof(tlmi_query_arg_t)))
+			return -EFAULT;
+		break;
+	case THINKLMI_SET_SETTING:
+		if (copy_from_user(get_set_string, (void *)arg,
+				   sizeof(get_set_string)))
+			return -EFAULT;
+		ret = think_lmi_set_bios_settings(get_set_string);
+		break;
+	case THINKLMI_SHOW_SETTING:
+		item = 0;
+		if (copy_from_user(get_set_string, (void *)arg,
+				   sizeof(get_set_string)))
+			return -EFAULT;
+		pr_info("%s\n", get_set_string);
+		for (i = 0; i <= think->settings_count; i++) {
+			if (think->settings[i] != NULL) {
+				if (!strcmp(get_set_string,
+					    think->settings[i])) {
+					pr_info("the setting is %d\n", i);
+					item = i;
 				}
-				
-
 			}
+		}
 
-			ret = think_lmi_setting(item,&settings, LENOVO_BIOS_SETTING_GUID);
-			if(ret)
-				return ret;
-			if(!settings)
-				return -EIO;
+		/*Do a WMI query for the settings */
+		ret = think_lmi_setting(item, &settings,
+					LENOVO_BIOS_SETTING_GUID);
+		if (ret)
+			goto error;
 
-			ret = think_lmi_get_bios_selections(get_set_string, &choices);
-			if(ret)
-				goto error;
-			if(!choices || !*choices)
-			{
-				return -EIO;
-			        goto error; 
-			}
+		ret = think_lmi_get_bios_selections(get_set_string,
+						    &choices);
+		if (ret)
+			goto error;
 
-			value = strchr(settings, ',');
-			if(!value)
-				goto error;
-			value ++;
-
-			count = sprintf(get_set_string, "%s\n", value);
-			if(choices)
-				count += sprintf(get_set_string + count, "%s\n", choices);
-                         
-
-
-			raw_copy_to_user((char *)arg, get_set_string, sizeof(get_set_string));
-			break;
-		default:
-			/*Return error condition?*/
-			printk("in default\n");
+		value = strchr(settings, ',');
+		if (!value)
+			goto error;
+		value++;
+		count = sprintf(get_set_string, "%s\n", value);
+		if (choices)
+			count += sprintf(get_set_string + count, "%s\n",
+					 choices);
+		if (copy_to_user((char *)arg, get_set_string,
+				 sizeof(get_set_string)))
+			return -EFAULT;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	return THINK_LMI_SUCCESS;
 
 error:
-        kfree(settings);
-        if(choices)
-		kfree(choices);
+	kfree(settings);
+	kfree(choices);
 	return ret ? ret : count;
 
 }
@@ -1265,17 +1256,11 @@ static int think_lmi_debugfs_init(struct think_lmi *think)
 	if (!dent)
 		goto error_debugfs;
 
-	dent = debugfs_create_u8("instance", S_IRUGO | S_IWUSR,
-				 think->debug.root,
+	debugfs_create_u8("instance", 0644, think->debug.root,
 				 &think->debug.instance);
-	if (!dent)
-		goto error_debugfs;
 
-	dent = debugfs_create_u8("instances_count", S_IRUGO,
-				 think->debug.root,
+	debugfs_create_u8("instances_count", 0444, think->debug.root,
 				 &think->debug.instances_count);
-	if (!dent)
-		goto error_debugfs;
 
 	for (i = 0; i < ARRAY_SIZE(think_lmi_debug_files); i++) {
 		struct think_lmi_debugfs_node *node;
@@ -1324,34 +1309,34 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
         int ret;
 	struct device *dev_ret;
 
-	if ((ret = alloc_chrdev_region(&dev, FIRST_MINOR, MINOR_CNT, DEVICE_NAME)) < 0)
-	{
-		printk(KERN_ERR "char dev allocation failed\n");
-		return;
-        }
-
-        //cdev_init(&c_dev, &think_lmi_chardev_fops);	
-        cdev_init(&think->c_dev, &think_lmi_chardev_fops);	
-
-	if ((ret = cdev_add(&think->c_dev, dev, MINOR_CNT)) < 0)
-	{
-		printk(KERN_ERR "char dev registration failed\n");
+	ret = alloc_chrdev_region(&tlmi_dev, 0, TLMI_NUM_DEVICES, TLMI_NAME);
+	if (ret < 0) {
+		pr_warn("tlmi: char dev allocation failed\n");
 		return;
 	}
 
-        if (IS_ERR(cl = class_create(THIS_MODULE, "char")))
-        {
+	cdev_init(&think->c_dev, &think_lmi_chardev_fops);
+
+	ret = cdev_add(&think->c_dev, tlmi_dev, TLMI_NUM_DEVICES);
+	if (ret < 0) {
+		pr_warn("tlmi: char dev registration failed\n");
+		unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
+		return;
+	}
+
+	tlmi_class = class_create(THIS_MODULE, "char");
+	if (IS_ERR(tlmi_class)) {
+		pr_warn("tlmi: char dev class creation failed\n");
 		cdev_del(&think->c_dev);
-		unregister_chrdev_region(dev, MINOR_CNT);
-		printk(KERN_ERR "char dev class creation failed\n");
+		unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
 		return;
         }
-        if (IS_ERR(dev_ret = device_create(cl, NULL, dev, NULL, "thinklmi")))
-        {
-		class_destroy(cl);
+	dev_ret = device_create(tlmi_class, NULL, tlmi_dev, NULL, "thinklmi");
+	if (IS_ERR(dev_ret)) {
+		pr_warn("tlmi: char dev device creation failed\n");
+		class_destroy(tlmi_class);
 		cdev_del(&think->c_dev);
-		unregister_chrdev_region(dev, MINOR_CNT);
-		printk(KERN_ERR "char dev device creation failed\n");
+		unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
         }
 }
 
@@ -1467,7 +1452,7 @@ static int think_lmi_remove(struct wmi_device *wdev)
 	return 0;
 }
 
-static int think_lmi_probe(struct wmi_device *wdev)
+static int think_lmi_probe(struct wmi_device *wdev, const void *context)
 {
 	return think_lmi_add(wdev);
 }
