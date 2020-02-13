@@ -301,6 +301,7 @@ struct think_lmi {
 	struct dev_ext_attribute *devattrs;
 	struct think_lmi_debug debug;
 	struct cdev c_dev;
+	struct device *tlmi_device;
 };
 
 static dev_t tlmi_dev;
@@ -1307,7 +1308,6 @@ error_debugfs:
 static void think_lmi_chardev_initialize(struct think_lmi *think)
 {
         int ret;
-	struct device *dev_ret;
 
 	ret = alloc_chrdev_region(&tlmi_dev, 0, TLMI_NUM_DEVICES, TLMI_NAME);
 	if (ret < 0) {
@@ -1324,20 +1324,29 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
 		return;
 	}
 
-	tlmi_class = class_create(THIS_MODULE, "char");
+	tlmi_class = class_create(THIS_MODULE, "tlmi");
 	if (IS_ERR(tlmi_class)) {
 		pr_warn("tlmi: char dev class creation failed\n");
 		cdev_del(&think->c_dev);
 		unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
 		return;
         }
-	dev_ret = device_create(tlmi_class, NULL, tlmi_dev, NULL, "thinklmi");
-	if (IS_ERR(dev_ret)) {
+	think->tlmi_device = device_create(tlmi_class, NULL, tlmi_dev, NULL,
+					   "thinklmi");
+	if (IS_ERR(think->tlmi_device)) {
 		pr_warn("tlmi: char dev device creation failed\n");
 		class_destroy(tlmi_class);
 		cdev_del(&think->c_dev);
 		unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
         }
+}
+
+static void think_lmi_chardev_exit(struct think_lmi *think)
+{
+	device_del(think->tlmi_device);
+	class_destroy(tlmi_class);
+	cdev_del(&think->c_dev);
+	unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
 }
 
 /* Base driver */
@@ -1442,12 +1451,12 @@ static int think_lmi_remove(struct wmi_device *wdev)
 	think = dev_get_drvdata(&wdev->dev);
 	think_lmi_debugfs_exit(think);
 	think_lmi_platform_exit(think);
+	think_lmi_chardev_exit(think);
 
 	for (i = 0; think->settings[i]; ++i) {
 		kfree(think->settings[i]);
 		think->settings[i] = NULL;
 	}
-
 	kfree(think);
 	return 0;
 }
