@@ -42,7 +42,7 @@
 #include <linux/acpi.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
-#include "thinklmi.h"
+#include "think-lmi.h"
 
 #define	THINK_LMI_FILE	"think-lmi"
 
@@ -594,6 +594,7 @@ static ssize_t show_auth(struct think_lmi *think, char *buf,
 /* Create the auth string from password chunks */
 static void update_auth_string(struct think_lmi *think)
 {
+
 	if (!*think->password) {
 		/* No password at all */
 		think->auth_string[0] = '\0';
@@ -942,7 +943,10 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
 	tlmi_query_arg_t q;
 	int i,j,ret,item;
 	char get_set_string[TLMI_SETTINGS_MAXCNT + TLMI_SETTINGS_MAXLEN];
-	char *settings = NULL, *choices = NULL, *value;
+	char password[128];
+	char encoding[32];
+	char kbd_lang[32];
+	char *settings = NULL, *choices = NULL, *value, *string;
 	ssize_t count =0;
 
 	think = filp->private_data;
@@ -1016,6 +1020,31 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
 		if (copy_to_user((char *)arg, get_set_string,
 				 sizeof(get_set_string)))
 			return -EFAULT;
+		break;
+        case THINKLMI_AUTHENTICATE:
+		if (copy_from_user(get_set_string, (void *)arg,
+				   sizeof(get_set_string)))
+			return -EFAULT;
+                string = (char *)kmalloc(sizeof(get_set_string),GFP_KERNEL);
+		string = strcpy(string, get_set_string);
+
+                value =strsep(&string, "\n");
+		sprintf(password,"%s",value);
+
+                value =strsep(&string, "\n");
+		sprintf(encoding,"%s",value);
+
+                value =strsep(&string, "\n");
+		sprintf(kbd_lang,"%s",value);
+
+		kfree(string);
+
+		strcpy(think->password, password);
+		strcpy(think->password_encoding, encoding);
+		strcpy(think->password_kbdlang, kbd_lang);
+
+		update_auth_string(think);
+
 		break;
 	default:
 		return -EINVAL;
@@ -1340,6 +1369,17 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
         }
 }
 
+static void think_lmi_chardev_exit(struct think_lmi *think)
+{
+	printk("chardev_exit\n");
+
+	device_destroy(tlmi_class, tlmi_dev);
+	class_destroy(tlmi_class);
+	cdev_del(&think->c_dev);
+	unregister_chrdev_region(tlmi_dev, TLMI_NUM_DEVICES);
+
+}
+
 /* Base driver */
 static void think_lmi_analyze(struct think_lmi *think)
 {
@@ -1442,6 +1482,7 @@ static int think_lmi_remove(struct wmi_device *wdev)
 	think = dev_get_drvdata(&wdev->dev);
 	think_lmi_debugfs_exit(think);
 	think_lmi_platform_exit(think);
+	think_lmi_chardev_exit(think);
 
 	for (i = 0; think->settings[i]; ++i) {
 		kfree(think->settings[i]);

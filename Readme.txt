@@ -17,8 +17,20 @@ gcc -o thinklmi thinklmi.c
 
 The above command will display the BIOS settings
 
-./thinklmi -g WakeOnLANDock
-The above command will get the available setings for WakeOnLANDock
 
-./thinklmi -s WakeOnLANDock Enable
+./thinklmi -g [BIOS Setting]
+
+eg: ./thinklmi -g WakeOnLANDock
+The above command will get the available options for WakeOnLANDock
+
+./thinklmi -s [BIOS Setting] [option]
+
+eg: ./thinklmi -s WakeOnLANDock Enable
 The above command will set the new value to the BIOS Setting
+
+./thinklmi -p [Password] [encoding] [keyboard language]
+
+eg: ./thinklmi -p hello ascii us
+If the supervisor password is set as hello, with ascii encoding
+and the keyboard type is US, the above command will authenticate the BIOS setting
+Once authenticated, it remains valid till the next restart.

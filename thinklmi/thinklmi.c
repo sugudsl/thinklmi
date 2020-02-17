@@ -63,36 +63,34 @@ void thinklmi_get(int fd, char * argv2)
 void thinklmi_set(int fd, char * argv2, char* argv3)
 {
 	char setting_string[MAXLEN + MAXCOUNT];
-	printf("in fucntion set : %s %s\n", argv2, argv3);
         strcpy(setting_string, argv2);
 	strcat(setting_string, ",");
 	strncat(setting_string, argv3, strlen(argv3));
 
 	strcat(setting_string, ";");
-	printf("%s\n", setting_string);
 
 	if(ioctl(fd, THINKLMI_SET_SETTING, &setting_string) == -1)
 	{
 	   perror(" ioctl set_ setting failed");
 	}
 
-	else
-	{
-           printf("set setting success\n");
 
+}
+void thinklmi_authenticate(int fd, char *argv2, char *argv3, char *argv4 )
+{
+	char setting_string[MAXLEN + MAXCOUNT];
+	strcpy(setting_string, argv2);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv3);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv4);
+	strcat(setting_string,"\n");
+
+        if(ioctl(fd, THINKLMI_AUTHENTICATE, &setting_string) == -1)
+	{
+		printf("ioctl authenticate failed\n");
 	}
 
-}
-void clr_vars(int fd)
-{
-        perror("query_apps ioctl clr");
-}
-void set_vars(int fd)
-{
-    query_arg_t q;
- 
- 
-        perror("query_apps ioctl set");
 }
  
 int main(int argc, char *argv[])
@@ -103,7 +101,8 @@ int main(int argc, char *argv[])
     {
 	get_settings,
 	get,
-	set
+	set,
+	authenticate
     } option;
 
     if (argc == 1)
@@ -151,7 +150,19 @@ int main(int argc, char *argv[])
 	}
 
 
-    }	    
+    }
+    else if (argc == 5)
+    {
+	if (strcmp(argv[1], "-p") == 0)
+	{
+	    option = authenticate;
+
+	}
+	else
+	{
+	   fprintf(stderr, "Usage: not correct\n");
+	}
+    }
     else
     {
         fprintf(stderr, "Usage: %s [-g | -s]\n", argv[0]);
@@ -175,6 +186,9 @@ int main(int argc, char *argv[])
         case set:
             thinklmi_set(fd, argv[2], argv[3]);
             break;
+	case authenticate:
+	    thinklmi_authenticate(fd, argv[2], argv[3],argv[4]);
+	    break;
         default:
             break;
     }
