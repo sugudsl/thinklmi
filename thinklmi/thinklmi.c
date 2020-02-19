@@ -46,23 +46,23 @@ void get_settings_all(int fd)
 
 void thinklmi_get(int fd, char * argv2)
 {
-	char get_string[MAXLEN + MAXCOUNT];
-        strcpy(get_string, argv2);
-	if(ioctl(fd, THINKLMI_SHOW_SETTING, &get_string) == -1)
+	char setting_string[GETSET_STRING_SIZE];
+        strcpy(setting_string, argv2);
+	if(ioctl(fd, THINKLMI_SHOW_SETTING, &setting_string) == -1)
 	{
 	   perror(" ioctl set_ setting failed");
 	}
 
 	else
 	{
-           printf("%s\n", get_string);
+           printf("%s\n", setting_string);
 
 	}
 }
 
 void thinklmi_set(int fd, char * argv2, char* argv3)
 {
-	char setting_string[MAXLEN + MAXCOUNT];
+	char setting_string[GETSET_STRING_SIZE];
         strcpy(setting_string, argv2);
 	strcat(setting_string, ",");
 	strncat(setting_string, argv3, strlen(argv3));
@@ -78,7 +78,7 @@ void thinklmi_set(int fd, char * argv2, char* argv3)
 }
 void thinklmi_authenticate(int fd, char *argv2, char *argv3, char *argv4 )
 {
-	char setting_string[MAXLEN + MAXCOUNT];
+	char setting_string[GETSET_STRING_SIZE];
 	strcpy(setting_string, argv2);
 	strcat(setting_string,"\n");
 	strcat(setting_string,argv3);
@@ -92,6 +92,27 @@ void thinklmi_authenticate(int fd, char *argv2, char *argv3, char *argv4 )
 	}
 
 }
+
+void thinklmi_change_password(int fd, char *argv2, char *argv3, char *argv4, char *argv5, char *argv6)
+{
+	char setting_string[GETSET_STRING_SIZE];
+	strcpy(setting_string, argv2);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv3);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv4);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv5);
+	strcat(setting_string,"\n");
+	strcat(setting_string,argv6);
+	strcat(setting_string,"\n");
+
+
+        if(ioctl(fd, THINKLMI_CHANGE_PASSWORD, &setting_string) == -1)
+	{
+		printf("ioctl authenticate failed\n");
+	}
+}
  
 int main(int argc, char *argv[])
 {
@@ -102,7 +123,8 @@ int main(int argc, char *argv[])
 	get_settings,
 	get,
 	set,
-	authenticate
+	authenticate,
+	change_password
     } option;
 
     if (argc == 1)
@@ -160,7 +182,18 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-	   fprintf(stderr, "Usage: not correct\n");
+	    fprintf(stderr, "Usage: not correct\n");
+	}
+    }
+    else if (argc == 7)
+    {
+	if (strcmp(argv[1], "-c") == 0)
+	{
+	    option = change_password;
+	}
+	else
+	{
+	    fprintf(stderr, "Usage: not correct\n");
 	}
     }
     else
@@ -188,6 +221,8 @@ int main(int argc, char *argv[])
             break;
 	case authenticate:
 	    thinklmi_authenticate(fd, argv[2], argv[3],argv[4]);
+	case change_password:
+	    thinklmi_change_password(fd, argv[2],argv[3],argv[4],argv[5],argv[6]);
 	    break;
         default:
             break;

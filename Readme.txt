@@ -34,3 +34,13 @@ eg: ./thinklmi -p hello ascii us
 If the supervisor password is set as hello, with ascii encoding
 and the keyboard type is US, the above command will authenticate the BIOS setting
 Once authenticated, it remains valid till the next restart.
+
+
+./thinklmi -c [Password] [Password] [Passwordtype] [encoding] [keyboard language]
+
+eg: ./thinklmi -p hello newpd pap ascii us
+Change the supervisor password or power on password using this command.
+Do a reboot for the new password to take effect.
+
+
+

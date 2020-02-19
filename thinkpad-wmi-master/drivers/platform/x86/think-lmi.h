@@ -22,6 +22,7 @@ typedef struct
 #define THINKLMI_SET_SETTING _IOW('t', 1, char *)
 #define THINKLMI_SHOW_SETTING _IOWR('u',1, char *)
 #define THINKLMI_AUTHENTICATE _IOW('v',1, char *)
+#define THINKLMI_CHANGE_PASSWORD _IOW('w',1, char *)
 
 #endif /* !_THINK_LMI_H_ */
 

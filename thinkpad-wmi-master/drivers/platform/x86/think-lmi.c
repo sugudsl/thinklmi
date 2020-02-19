@@ -2,7 +2,7 @@
 /*
  * Think LMI BIOS configuration driver
  *
- * Copyright(C) 2019 Sugumaran L<slacshiminar@lenovo.com>
+ * Copyright(C) 2019 Sugumaran L<slacshiminar@lenovo.com>, Mark Pearson <mpearson@lenovo.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -47,6 +47,7 @@
 #define	THINK_LMI_FILE	"think-lmi"
 
 MODULE_AUTHOR("Sugumaran L <slacshiminar@lenovo.com>");
+MODULE_AUTHOR("Mark Pearson <mpearson@lenovo.com>");
 MODULE_DESCRIPTION("Think LMI Driver");
 MODULE_LICENSE("GPL");
 
@@ -402,12 +403,14 @@ static int think_lmi_get_bios_selections(const char *item, char **value)
 
 static int think_lmi_set_bios_settings(const char *settings)
 {
+
 	return think_lmi_simple_call(LENOVO_SET_BIOS_SETTINGS_GUID,
 					settings);
 }
 
 static int think_lmi_set_platform_settings(const char *settings)
 {
+
 	return think_lmi_simple_call(LENOVO_SET_PLATFORM_SETTINGS_GUID,
 					settings);
 }
@@ -943,9 +946,11 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
 	tlmi_query_arg_t q;
 	int i,j,ret,item;
 	char get_set_string[TLMI_SETTINGS_MAXCNT + TLMI_SETTINGS_MAXLEN];
-	char password[128];
-	char encoding[32];
-	char kbd_lang[32];
+	char password[64];
+	char newpassword[64];
+	char passtype[64];
+	char encoding[64];
+	char kbd_lang[4];
 	char *settings = NULL, *choices = NULL, *value, *string;
 	ssize_t count =0;
 
@@ -1028,13 +1033,13 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
                 string = (char *)kmalloc(sizeof(get_set_string),GFP_KERNEL);
 		string = strcpy(string, get_set_string);
 
-                value =strsep(&string, "\n");
+                value = strsep(&string, "\n");
 		sprintf(password,"%s",value);
 
-                value =strsep(&string, "\n");
+                value = strsep(&string, "\n");
 		sprintf(encoding,"%s",value);
 
-                value =strsep(&string, "\n");
+                value = strsep(&string, "\n");
 		sprintf(kbd_lang,"%s",value);
 
 		kfree(string);
@@ -1046,6 +1051,51 @@ static long think_lmi_chardev_ioctl(struct file *filp, unsigned int cmd,
 		update_auth_string(think);
 
 		break;
+
+	case THINKLMI_CHANGE_PASSWORD:
+		if (copy_from_user(get_set_string, (void *)arg,
+				   sizeof(get_set_string)))
+			return -EFAULT;
+                string = (char *)kmalloc(sizeof(get_set_string),GFP_KERNEL);
+		string = strcpy(string, get_set_string);
+
+                value = strsep(&string, "\n");
+		sprintf(password,"%s",value);
+
+                value = strsep(&string, "\n");
+		sprintf(newpassword,"%s",value);
+
+                value = strsep(&string, "\n");
+		sprintf(passtype,"%s",value);
+
+		value = strsep(&string, "\n");
+		sprintf(encoding,"%s",value);
+
+                value = strsep(&string, "\n");
+		sprintf(kbd_lang,"%s",value);
+
+		kfree(string);
+		strcpy(think->password, password);
+		strcpy(think->password_encoding, encoding);
+		strcpy(think->password_kbdlang, kbd_lang);
+		strcpy(think->password_type, passtype);
+
+		update_auth_string(think);
+
+		strcpy(get_set_string, passtype);
+		strcat(get_set_string, ",");
+		strcat(get_set_string, password);
+		strcat(get_set_string, ",");
+		strcat(get_set_string, newpassword);
+		strcat(get_set_string, ",");
+		strcat(get_set_string, encoding);
+		strcat(get_set_string, ",");
+		strcat(get_set_string, kbd_lang);
+		strcat(get_set_string, ";");
+
+	        ret = think_lmi_set_bios_password(get_set_string);
+		break;
+
 	default:
 		return -EINVAL;
 	}
@@ -1371,8 +1421,6 @@ static void think_lmi_chardev_initialize(struct think_lmi *think)
 
 static void think_lmi_chardev_exit(struct think_lmi *think)
 {
-	printk("chardev_exit\n");
-
 	device_destroy(tlmi_class, tlmi_dev);
 	class_destroy(tlmi_class);
 	cdev_del(&think->c_dev);
